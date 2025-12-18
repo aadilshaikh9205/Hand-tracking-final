@@ -1,0 +1,88 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aether - Local 3D Particles</title>
+    <link rel="stylesheet" href="index.css">
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@0.160.0",
+    "theme": "https://esm.sh/theme@^0.1.0"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="app">
+        <canvas id="three-canvas"></canvas>
+        
+        <div id="permission-overlay">
+            <div class="overlay-content">
+                <h2>AETHER VISION</h2>
+                <div id="permission-message">
+                  <p>To interact with the particle field using your hands, please enable camera access below.</p>
+                </div>
+                <button id="start-btn">ENABLE AETHER</button>
+                <div id="instruction-hint" style="margin-top: 20px; font-size: 0.8rem; opacity: 0.5; display: none;">
+                  Check the address bar for a blocked camera icon.
+                </div>
+            </div>
+        </div>
+
+        <div id="ui-overlay">
+            <div class="header">
+                <h1>AETHER <span class="badge">VISION</span></h1>
+                <p id="status">Waiting for interaction...</p>
+            </div>
+            
+            <div class="video-preview-container">
+                <video id="video-feed" autoplay playsinline muted></video>
+                <canvas id="gesture-canvas"></canvas>
+                <div class="scanning-bar"></div>
+            </div>
+
+            <div id="controls-log">
+                <div class="log-entry">
+                  Local Hand Tracking (Active)
+                  <span id="theme-label">Theme: Aether</span>
+                  <span>Wind & Perlin Field: Enabled</span>
+                </div>
+
+                <div class="log-entry">
+                  <span>PARTICLE SIZE</span>
+                  <input type="range" id="size-slider" min="0.01" max="0.3" step="0.01" value="0.08" style="width: 100%; margin-top: 5px; cursor: pointer;">
+                </div>
+
+                <div class="log-entry">
+                  <span>LIFESPAN SPEED</span>
+                  <input type="range" id="lifespan-slider" min="0" max="5" step="0.1" value="1" style="width: 100%; margin-top: 5px; cursor: pointer;">
+                </div>
+
+                <div class="palette-creator log-entry">
+                    <span style="margin-bottom: 4px;">CREATE CUSTOM THEME</span>
+                    <div class="creator-inputs">
+                        <input type="text" id="hex-a" placeholder="#00f2ff" value="#ff00ff">
+                        <input type="text" id="hex-b" placeholder="#ff00ff" value="#00ffff">
+                        <button id="add-palette-btn">+</button>
+                    </div>
+                </div>
+                
+                <div class="persistence-controls">
+                    <button id="save-btn" title="Save current config">SAVE CONFIG</button>
+                    <button id="load-btn" title="Load saved config">LOAD CONFIG</button>
+                    <button id="clear-palettes-btn" title="Reset Palettes">RESET</button>
+                </div>
+            </div>
+
+            <div class="hint">
+                👋 WAVE to morph • 🤏 PINCH to expand • ❤️ TWO HANDS for Valentine Heart
+            </div>
+        </div>
+    </div>
+    <script type="module" src="index.tsx"></script>
+</body>
+</html>
