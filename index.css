@@ -2,7 +2,7 @@
 :root {
   --accent: #00f2ff;
   --bg: #050505;
-  --panel: rgba(20, 20, 25, 0.7);
+  --panel: rgba(20, 20, 25, 0.85);
 }
 
 body, html {
@@ -173,28 +173,78 @@ h1 {
 
 #controls-log {
   margin-top: auto;
-  max-width: 320px;
+  max-width: 360px;
   pointer-events: auto;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+/* Hide scrollbar */
+#controls-log::-webkit-scrollbar {
+  width: 4px;
+}
+#controls-log::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 10px;
 }
 
 .log-entry {
   font-size: 0.85rem;
-  padding: 0.6rem 1rem;
+  padding: 0.8rem 1rem;
   background: var(--panel);
   border-radius: 6px;
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(15px);
   color: var(--accent);
   border-left: 3px solid var(--accent);
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .log-entry span {
   font-size: 0.7rem;
+  font-weight: bold;
+  letter-spacing: 1px;
   opacity: 0.8;
   color: white;
+  text-transform: uppercase;
+}
+
+.button-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.grid-btn {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: white;
+    font-size: 0.6rem;
+    padding: 6px 4px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.grid-btn:hover {
+    background: rgba(0, 242, 255, 0.1);
+    border-color: var(--accent);
+}
+
+.grid-btn.active {
+    background: var(--accent);
+    color: black;
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
 }
 
 .creator-inputs {

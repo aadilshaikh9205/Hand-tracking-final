@@ -1,9 +1,8 @@
 
-import * as THREE from 'theme'; // Note: The actual import from index.tsx provided was 'three', using that.
-import * as THREE_REAL from 'three';
-
-// Use the local three import as per instructions
-const THREE = THREE_REAL;
+import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 // --- Noise Utility ---
 class Noise3D {
@@ -45,6 +44,7 @@ const STORAGE_KEY = 'aether_vision_config';
 const CUSTOM_PALETTES_KEY = 'aether_custom_palettes';
 
 type Template = 'HEART' | 'FLOWER' | 'SATURN' | 'FIREWORKS' | 'SPHERE' | 'GALAXY' | 'NEBULA';
+const ALL_TEMPLATES: Template[] = ['SPHERE', 'HEART', 'GALAXY', 'NEBULA', 'FLOWER', 'SATURN', 'FIREWORKS'];
 
 interface ColorPalette {
   name: string;
@@ -66,13 +66,14 @@ let activePalettes: ColorPalette[] = [...BASE_PALETTES];
 interface ParticleState {
   template: Template;
   expansion: number;
-  attractionPoint: THREE_REAL.Vector3;
+  attractionPoint: THREE.Vector3;
   attractionStrength: number;
   paletteIndex: number;
   nextPaletteIndex: number;
   paletteTransition: number;
   baseParticleSize: number;
   lifespanSpeed: number;
+  bloomIntensity: number;
 }
 
 // --- Audio Engine ---
@@ -157,11 +158,13 @@ class AetherAudio {
 
 // --- Particle Engine ---
 class ParticleEngine {
-  scene: THREE_REAL.Scene;
-  camera: THREE_REAL.PerspectiveCamera;
-  renderer: THREE_REAL.WebGLRenderer;
-  points: THREE_REAL.Points;
-  geometry: THREE_REAL.BufferGeometry;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  renderer: THREE.WebGLRenderer;
+  composer: EffectComposer;
+  bloomPass: UnrealBloomPass;
+  points: THREE.Points;
+  geometry: THREE.BufferGeometry;
   audio: AetherAudio;
   noiseField: Noise3D;
   
@@ -182,7 +185,8 @@ class ParticleEngine {
     nextPaletteIndex: 0,
     paletteTransition: 1.0,
     baseParticleSize: 0.08,
-    lifespanSpeed: 1.0
+    lifespanSpeed: 1.0,
+    bloomIntensity: 1.5
   };
 
   constructor(audio: AetherAudio) {
@@ -192,11 +196,24 @@ class ParticleEngine {
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     this.renderer = new THREE.WebGLRenderer({ 
         canvas: document.getElementById('three-canvas') as HTMLCanvasElement,
-        antialias: true,
+        antialias: false,
         alpha: true
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.toneMapping = THREE.ReinhardToneMapping;
+
+    this.composer = new EffectComposer(this.renderer);
+    const renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(renderPass);
+
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      this.state.bloomIntensity,
+      0.4,
+      0.1
+    );
+    this.composer.addPass(this.bloomPass);
 
     this.positions = new Float32Array(PARTICLE_COUNT * 3);
     this.targetPositions = new Float32Array(PARTICLE_COUNT * 3);
@@ -206,14 +223,10 @@ class ParticleEngine {
     this.lifespanValues = new Float32Array(PARTICLE_COUNT);
     this.decayRates = new Float32Array(PARTICLE_COUNT);
 
-    // Initialize individual properties
     for (let i = 0; i < PARTICLE_COUNT; i++) {
         this.sizes[i] = this.state.baseParticleSize * (0.8 + Math.random() * 0.4);
-        this.lifespanValues[i] = Math.random(); // Random starting life (0.0 to 1.0)
-        
-        // Randomize the lifespan duration from 0.5 to 2.0.
-        // We calculate the decay rate such that a lifespan of L results in a decay of (BaseRate / L).
-        const individualLifespan = 0.5 + Math.random() * 1.5; // 0.5 to 2.0
+        this.lifespanValues[i] = Math.random();
+        const individualLifespan = 0.5 + Math.random() * 1.5;
         this.decayRates[i] = 0.008 / individualLifespan; 
     }
 
@@ -224,9 +237,6 @@ class ParticleEngine {
     this.geometry.setAttribute('life', new THREE.BufferAttribute(this.lifespanValues, 1));
 
     const shaderMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0.0 }
-      },
       vertexShader: `
         attribute float size;
         attribute float life;
@@ -248,9 +258,8 @@ class ParticleEngine {
           float dist = distance(gl_PointCoord, vec2(0.5));
           if (dist > 0.5) discard;
           float alpha = 1.0 - smoothstep(0.4, 0.5, dist);
-          
           float sparkle = smoothstep(0.0, 0.2, vLife) * smoothstep(1.0, 0.8, vLife);
-          gl_FragColor = vec4(vColor, alpha * 0.7 * sparkle);
+          gl_FragColor = vec4(vColor, alpha * 0.8 * sparkle);
         }
       `,
       transparent: true,
@@ -270,25 +279,36 @@ class ParticleEngine {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.composer.setSize(window.innerWidth, window.innerHeight);
+      this.bloomPass.resolution.set(window.innerWidth, window.innerHeight);
     });
   }
 
   startPaletteCycle() {
     setInterval(() => {
       if (this.state.template === 'HEART' && this.state.nextPaletteIndex === 5) return;
-      this.state.nextPaletteIndex = (this.state.paletteIndex + 1) % activePalettes.length;
-      this.state.paletteTransition = 0;
-      this.updateThemeLabel();
-    }, 10000);
+      // Only cycle if user isn't interacting manually (heuristically checking status)
+      const status = document.getElementById('status')?.textContent;
+      if (status && status.includes("Watching")) {
+        this.state.nextPaletteIndex = (this.state.paletteIndex + 1) % activePalettes.length;
+        this.state.paletteTransition = 0;
+        this.updateThemeLabel();
+      }
+    }, 12000);
   }
 
   forcePalette(index: number) {
     if (index >= activePalettes.length) index = 0;
-    if (this.state.nextPaletteIndex === index) return;
     this.state.nextPaletteIndex = index;
     this.state.paletteTransition = 0;
     this.updateThemeLabel();
     if (index === 5) this.audio.playValentineChime();
+    
+    // Highlight active texture button
+    document.querySelectorAll('.texture-btn').forEach((btn, i) => {
+        if (i === index) btn.classList.add('active');
+        else btn.classList.remove('active');
+    });
   }
 
   updateThemeLabel() {
@@ -303,6 +323,11 @@ class ParticleEngine {
         sizeAttr[i] = baseSize * (0.8 + Math.random() * 0.4);
     }
     this.geometry.attributes.size.needsUpdate = true;
+  }
+
+  setBloomIntensity(intensity: number) {
+    this.state.bloomIntensity = intensity;
+    this.bloomPass.strength = intensity;
   }
 
   setLifespanSpeed(speed: number) {
@@ -322,36 +347,23 @@ class ParticleEngine {
 
       switch(type) {
         case 'HEART': {
-          // Enhanced Heart: More pronounced top cleft and bulbous "cheeks" for a high-end 3D aesthetic
           const t = Math.random() * Math.PI * 2;
           const u = (Math.random() - 0.5) * 2.0;
-          
-          // Parametric heart: x = 16 sin^3(t)
           const h_x = 16 * Math.pow(Math.sin(t), 3);
-          
-          // Refined y coefficients to pull the cleft deeper at t=0 and t=2PI
-          // Coefficients tweaked: 15 (base height), 7.5 (dip depth), 2.5 (lower curve), 1.5 (bottom point)
           const h_y = 15 * Math.cos(t) - 8 * Math.cos(2 * t) - 2.5 * Math.cos(3 * t) - Math.cos(4 * t);
-          
-          // 3D puffy volume effect using u
-          // Using a power function on the cosine bulge to make it feel more "pillowy"
           const volume = Math.pow(Math.cos(u * Math.PI * 0.5), 0.5); 
-          x = h_x * volume;
-          y = h_y * volume;
-          z = u * 12 * volume; 
-          
-          x *= 0.85; 
-          y *= 0.85;
-          y += 3.0; // Center visually within the camera frame
+          x = h_x * volume; y = h_y * volume; z = u * 12 * volume; 
+          x *= 0.85; y *= 0.85; y += 3.0;
           break;
         }
-        case 'FLOWER':
+        case 'FLOWER': {
           const f_angle = Math.random() * Math.PI * 2;
           const k = 6; 
           const r = 18 * Math.cos(k * f_angle);
           x = r * Math.cos(f_angle); y = r * Math.sin(f_angle); z = (Math.random() - 0.5) * 6;
           break;
-        case 'SATURN':
+        }
+        case 'SATURN': {
           if (i < PARTICLE_COUNT * 0.4) {
             const s_radius = 8 * Math.pow(Math.random(), 0.5);
             const su = Math.random() * Math.PI * 2;
@@ -367,36 +379,47 @@ class ParticleEngine {
             y = tempY; z = tempZ;
           }
           break;
-        case 'FIREWORKS':
+        }
+        case 'FIREWORKS': {
           const fireRadius = 10 + Math.random() * 25;
           const fTheta = Math.random() * Math.PI * 2;
           const fPhi = Math.acos(2 * Math.random() - 1);
           x = fireRadius * Math.sin(fPhi) * Math.cos(fTheta); y = fireRadius * Math.sin(fPhi) * Math.sin(fTheta); z = fireRadius * Math.cos(fPhi);
           break;
-        case 'GALAXY':
+        }
+        case 'GALAXY': {
           const arm = i % 2 === 0 ? 0 : Math.PI;
           const r_gal = Math.random() * 25;
           const theta_gal = r_gal * 0.4 + arm + (Math.random() - 0.5) * 0.8;
           x = r_gal * Math.cos(theta_gal); y = r_gal * Math.sin(theta_gal); z = (Math.random() - 0.5) * (15 / (r_gal + 1));
           break;
-        case 'NEBULA':
+        }
+        case 'NEBULA': {
           const u_neb = Math.random() * Math.PI * 2;
           const v_neb = Math.random() * Math.PI - Math.PI/2;
           const r_neb = 18 * (Math.random() + 0.1);
           const pinch = 0.15 + Math.pow(Math.abs(Math.sin(v_neb)), 2);
           x = r_neb * pinch * Math.cos(v_neb) * Math.cos(u_neb); y = r_neb * pinch * Math.sin(v_neb); z = r_neb * pinch * Math.cos(v_neb) * Math.sin(u_neb);
           break;
-        default: // SPHERE
+        }
+        default: { // SPHERE
           const s_su = Math.random() * Math.PI * 2;
           const s_sv = Math.acos(2 * Math.random() - 1);
           const sradius = 15;
           x = sradius * Math.sin(s_sv) * Math.cos(s_su); y = sradius * Math.sin(s_sv) * Math.sin(s_su); z = sradius * Math.cos(s_sv);
+        }
       }
       tempPositions[idx] = x;
       tempPositions[idx+1] = y;
       tempPositions[idx+2] = z;
     }
     this.targetPositions.set(tempPositions);
+
+    // Update active UI button
+    document.querySelectorAll('.struct-btn').forEach(btn => {
+        if (btn.textContent === type) btn.classList.add('active');
+        else btn.classList.remove('active');
+    });
   }
 
   updatePhysics(expansion: number, attractX: number, attractY: number, attractActive: boolean) {
@@ -411,7 +434,8 @@ class ParticleEngine {
       template: this.state.template, 
       paletteIndex: this.state.paletteIndex,
       particleSize: this.state.baseParticleSize,
-      lifespanSpeed: this.state.lifespanSpeed
+      lifespanSpeed: this.state.lifespanSpeed,
+      bloomIntensity: this.state.bloomIntensity
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
     return config;
@@ -435,6 +459,11 @@ class ParticleEngine {
           this.setLifespanSpeed(config.lifespanSpeed);
           const slider = document.getElementById('lifespan-slider') as HTMLInputElement;
           if (slider) slider.value = config.lifespanSpeed.toString();
+      }
+      if (config.bloomIntensity !== undefined) {
+          this.setBloomIntensity(config.bloomIntensity);
+          const slider = document.getElementById('bloom-slider') as HTMLInputElement;
+          if (slider) slider.value = config.bloomIntensity.toString();
       }
       this.updateThemeLabel();
       return config;
@@ -479,7 +508,6 @@ class ParticleEngine {
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const ix = i * 3; const iy = i * 3 + 1; const iz = i * 3 + 2;
       
-      // Lifespan update
       lifeAttr[i] -= this.decayRates[i] * lifespanSpeed;
       if (lifeAttr[i] <= 0) {
           lifeAttr[i] = 1.0;
@@ -513,7 +541,7 @@ class ParticleEngine {
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.life.needsUpdate = true;
     this.points.rotation.y += 0.001;
-    this.renderer.render(this.scene, this.camera);
+    this.composer.render();
   }
 }
 
@@ -537,14 +565,41 @@ async function setupApp() {
   const hexBInput = document.getElementById('hex-b') as HTMLInputElement;
   const sizeSlider = document.getElementById('size-slider') as HTMLInputElement;
   const lifespanSlider = document.getElementById('lifespan-slider') as HTMLInputElement;
+  const bloomSlider = document.getElementById('bloom-slider') as HTMLInputElement;
+  
+  const structGrid = document.getElementById('structure-grid')!;
+  const textureGrid = document.getElementById('texture-grid')!;
 
-  // Load custom palettes
+  // Initialize Structure Buttons
+  ALL_TEMPLATES.forEach(temp => {
+      const btn = document.createElement('button');
+      btn.className = 'grid-btn struct-btn';
+      btn.textContent = temp;
+      btn.onclick = () => engine.setTemplate(temp);
+      structGrid.appendChild(btn);
+  });
+
+  // Initialize Texture Buttons
+  const updateTextureButtons = () => {
+    textureGrid.innerHTML = '';
+    activePalettes.forEach((pal, idx) => {
+        const btn = document.createElement('button');
+        btn.className = 'grid-btn texture-btn';
+        btn.textContent = pal.name;
+        btn.style.borderColor = pal.colorA;
+        btn.onclick = () => engine.forcePalette(idx);
+        textureGrid.appendChild(btn);
+    });
+  };
+  updateTextureButtons();
+
   const loadCustomPalettes = () => {
     const saved = localStorage.getItem(CUSTOM_PALETTES_KEY);
     if (saved) {
       try {
         const custom = JSON.parse(saved);
         activePalettes = [...BASE_PALETTES, ...custom];
+        updateTextureButtons();
       } catch (e) {
         activePalettes = [...BASE_PALETTES];
       }
@@ -562,6 +617,11 @@ async function setupApp() {
     engine.setLifespanSpeed(val);
   };
 
+  bloomSlider.oninput = (e) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    engine.setBloomIntensity(val);
+  };
+
   addPaletteBtn.onclick = () => {
     const colorA = hexAInput.value.trim();
     const colorB = hexBInput.value.trim();
@@ -571,6 +631,7 @@ async function setupApp() {
       custom.push(newPalette);
       localStorage.setItem(CUSTOM_PALETTES_KEY, JSON.stringify(custom));
       activePalettes.push(newPalette);
+      updateTextureButtons();
       statusEl.textContent = "Custom Palette Added.";
       engine.forcePalette(activePalettes.length - 1);
     } else {
@@ -582,6 +643,7 @@ async function setupApp() {
   clearPalettesBtn.onclick = () => {
     localStorage.removeItem(CUSTOM_PALETTES_KEY);
     activePalettes = [...BASE_PALETTES];
+    updateTextureButtons();
     statusEl.textContent = "Palettes Reset.";
     engine.forcePalette(0);
     setTimeout(() => { if (statusEl.textContent === "Palettes Reset.") statusEl.textContent = "Watching for hands..."; }, 2000);
@@ -596,7 +658,7 @@ async function setupApp() {
   loadBtn.onclick = () => {
     const loaded = engine.loadConfig();
     if (loaded) {
-      statusEl.textContent = `Loaded: ${loaded.template} with ${activePalettes[loaded.paletteIndex]?.name || 'Unknown'}`;
+      statusEl.textContent = `Loaded: ${loaded.template}`;
     } else {
       statusEl.textContent = "No saved config found.";
     }
@@ -614,15 +676,6 @@ async function setupApp() {
     minDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5
   });
-
-  let idleTemplateIdx = 0;
-  const idleTemplates: Template[] = ['SPHERE', 'GALAXY', 'NEBULA'];
-  setInterval(() => {
-    if (statusEl.textContent?.includes("Watching")) {
-      idleTemplateIdx = (idleTemplateIdx + 1) % idleTemplates.length;
-      engine.setTemplate(idleTemplates[idleTemplateIdx]);
-    }
-  }, 15000);
 
   hands.onResults((results: any) => {
     ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
@@ -645,7 +698,9 @@ async function setupApp() {
         const palmSize = Math.sqrt(Math.pow(wrist.x - indexTip.x, 2));
         if (palmSize > 0.3) engine.setTemplate('HEART');
         else if (dist < 0.05) engine.setTemplate('SATURN');
-        else engine.setTemplate('FLOWER');
+        else {
+           // We don't force morph here to let buttons work, but maybe handle wave
+        }
         engine.updatePhysics(expansion, attractX, attractY, true);
       }
 

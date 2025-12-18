@@ -11,7 +11,10 @@
 {
   "imports": {
     "three": "https://esm.sh/three@0.160.0",
-    "theme": "https://esm.sh/theme@^0.1.0"
+    "three/examples/jsm/postprocessing/EffectComposer.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js",
+    "three/examples/jsm/postprocessing/RenderPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/RenderPass.js",
+    "three/examples/jsm/postprocessing/UnrealBloomPass.js": "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js",
+    "three/": "https://esm.sh/three@^0.182.0/"
   }
 }
 </script>
@@ -47,14 +50,27 @@
 
             <div id="controls-log">
                 <div class="log-entry">
-                  Local Hand Tracking (Active)
-                  <span id="theme-label">Theme: Aether</span>
-                  <span>Wind & Perlin Field: Enabled</span>
+                  <span>STRUCTURES</span>
+                  <div id="structure-grid" class="button-grid">
+                      <!-- Structure buttons generated via JS -->
+                  </div>
+                </div>
+
+                <div class="log-entry">
+                  <span>TEXTURE THEMES</span>
+                  <div id="texture-grid" class="button-grid">
+                      <!-- Texture buttons generated via JS -->
+                  </div>
                 </div>
 
                 <div class="log-entry">
                   <span>PARTICLE SIZE</span>
                   <input type="range" id="size-slider" min="0.01" max="0.3" step="0.01" value="0.08" style="width: 100%; margin-top: 5px; cursor: pointer;">
+                </div>
+
+                <div class="log-entry">
+                  <span>BLOOM INTENSITY</span>
+                  <input type="range" id="bloom-slider" min="0" max="3" step="0.05" value="1.5" style="width: 100%; margin-top: 5px; cursor: pointer;">
                 </div>
 
                 <div class="log-entry">

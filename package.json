@@ -9,8 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "three": "0.160.0",
-    "theme": "^0.1.0"
+    "three": "^0.182.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
