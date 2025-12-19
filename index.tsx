@@ -43,8 +43,8 @@ const PARTICLE_COUNT = 20000;
 const STORAGE_KEY = 'aether_vision_config';
 const CUSTOM_PALETTES_KEY = 'aether_custom_palettes';
 
-type Template = 'HEART' | 'FLOWER' | 'SATURN' | 'FIREWORKS' | 'SPHERE' | 'GALAXY' | 'NEBULA';
-const ALL_TEMPLATES: Template[] = ['SPHERE', 'HEART', 'GALAXY', 'NEBULA', 'FLOWER', 'SATURN', 'FIREWORKS'];
+type Template = 'HEART' | 'FLOWER' | 'SATURN' | 'FIREWORKS' | 'SPHERE' | 'GALAXY' | 'NEBULA' | 'AADIL';
+const ALL_TEMPLATES: Template[] = ['SPHERE', 'HEART', 'GALAXY', 'NEBULA', 'FLOWER', 'SATURN', 'FIREWORKS', 'AADIL'];
 
 interface ColorPalette {
   name: string;
@@ -58,7 +58,8 @@ const BASE_PALETTES: ColorPalette[] = [
   { name: 'Borealis', colorA: '#00ff87', colorB: '#60efff' },
   { name: 'Cyber', colorA: '#7000ff', colorB: '#00ffcc' },
   { name: 'GoldRush', colorA: '#ffd700', colorB: '#ffffff' },
-  { name: 'Valentine', colorA: '#ff0044', colorB: '#ff88cc' }
+  { name: 'Valentine', colorA: '#ff0044', colorB: '#ff88cc' },
+  { name: 'Aadil', colorA: '#FFD700', colorB: '#FFFFFF' }
 ];
 
 let activePalettes: ColorPalette[] = [...BASE_PALETTES];
@@ -189,6 +190,9 @@ class ParticleEngine {
     bloomIntensity: 1.5
   };
 
+  // Pre-sampled text coordinates for "Aadil"
+  textCoords: {x: number, y: number}[] = [];
+
   constructor(audio: AetherAudio) {
     this.audio = audio;
     this.noiseField = new Noise3D();
@@ -271,6 +275,9 @@ class ParticleEngine {
     this.scene.add(this.points);
     this.camera.position.z = 40;
 
+    // Prepare text sampling for "Aadil"
+    this.prepareTextSampling("Aadil");
+
     this.setTemplate('SPHERE');
     this.animate();
     this.startPaletteCycle();
@@ -284,10 +291,46 @@ class ParticleEngine {
     });
   }
 
+  prepareTextSampling(text: string) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Adjusted sampling canvas size for better mobile proportions
+    canvas.width = 800;
+    canvas.height = 400;
+    
+    ctx.fillStyle = 'white';
+    // Using a font size that leaves room for the display edges
+    ctx.font = 'bold 200px "Inter", "Arial", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imageData.data;
+    const step = 2;
+    
+    this.textCoords = [];
+    for (let y = 0; y < canvas.height; y += step) {
+      for (let x = 0; x < canvas.width; x += step) {
+        const index = (y * canvas.width + x) * 4;
+        if (pixels[index] > 128) {
+          // Scaling down the normalization factor from 0.12 to 0.05 
+          // to make the structure "normal" size for mobile displays
+          this.textCoords.push({
+            x: (x - canvas.width / 2) * 0.055, 
+            y: (canvas.height / 2 - y) * 0.055
+          });
+        }
+      }
+    }
+  }
+
   startPaletteCycle() {
     setInterval(() => {
       if (this.state.template === 'HEART' && this.state.nextPaletteIndex === 5) return;
-      // Only cycle if user isn't interacting manually (heuristically checking status)
+      if (this.state.template === 'AADIL' && this.state.nextPaletteIndex === 6) return;
       const status = document.getElementById('status')?.textContent;
       if (status && status.includes("Watching")) {
         this.state.nextPaletteIndex = (this.state.paletteIndex + 1) % activePalettes.length;
@@ -304,7 +347,6 @@ class ParticleEngine {
     this.updateThemeLabel();
     if (index === 5) this.audio.playValentineChime();
     
-    // Highlight active texture button
     document.querySelectorAll('.texture-btn').forEach((btn, i) => {
         if (i === index) btn.classList.add('active');
         else btn.classList.remove('active');
@@ -346,6 +388,22 @@ class ParticleEngine {
       let x = 0, y = 0, z = 0;
 
       switch(type) {
+        case 'AADIL': {
+          if (this.textCoords.length > 0) {
+            const coord = this.textCoords[i % this.textCoords.length];
+            x = coord.x;
+            y = coord.y;
+            z = (Math.random() - 0.5) * 2; // Reduced 3D depth for a cleaner mobile look
+          } else {
+            const t = Math.random();
+            const theta = Math.random() * Math.PI * 2;
+            const xPos = (t - 0.5) * 30;
+            const yWave = Math.sin(t * Math.PI * 4) * 3;
+            const radius = 1 + Math.random() * 2;
+            x = xPos; y = yWave + Math.cos(theta) * radius; z = Math.sin(theta) * radius;
+          }
+          break;
+        }
         case 'HEART': {
           const t = Math.random() * Math.PI * 2;
           const u = (Math.random() - 0.5) * 2.0;
@@ -415,11 +473,14 @@ class ParticleEngine {
     }
     this.targetPositions.set(tempPositions);
 
-    // Update active UI button
     document.querySelectorAll('.struct-btn').forEach(btn => {
         if (btn.textContent === type) btn.classList.add('active');
         else btn.classList.remove('active');
     });
+
+    if (type === 'AADIL') {
+      this.forcePalette(6);
+    }
   }
 
   updatePhysics(expansion: number, attractX: number, attractY: number, attractActive: boolean) {
@@ -478,7 +539,7 @@ class ParticleEngine {
     const target = this.targetPositions;
     const vel = this.velocities;
     const lifeAttr = this.geometry.attributes.life.array as Float32Array;
-    const { expansion, attractionPoint, attractionStrength, paletteIndex, nextPaletteIndex, paletteTransition, lifespanSpeed } = this.state;
+    const { expansion, attractionPoint, attractionStrength, paletteIndex, nextPaletteIndex, paletteTransition, lifespanSpeed, template } = this.state;
     const time = performance.now() * 0.001;
 
     if (this.state.paletteTransition < 1.0) {
@@ -511,15 +572,16 @@ class ParticleEngine {
       lifeAttr[i] -= this.decayRates[i] * lifespanSpeed;
       if (lifeAttr[i] <= 0) {
           lifeAttr[i] = 1.0;
-          pos[ix] = target[ix] * expansion + (Math.random() - 0.5) * 5;
-          pos[iy] = target[iy] * expansion + (Math.random() - 0.5) * 5;
-          pos[iz] = target[iz] * expansion + (Math.random() - 0.5) * 5;
+          pos[ix] = target[ix] * expansion + (Math.random() - 0.5) * (template === 'AADIL' ? 0.2 : 5);
+          pos[iy] = target[iy] * expansion + (Math.random() - 0.5) * (template === 'AADIL' ? 0.2 : 5);
+          pos[iz] = target[iz] * expansion + (Math.random() - 0.5) * (template === 'AADIL' ? 0.2 : 5);
           vel[ix] = 0; vel[iy] = 0; vel[iz] = 0;
       }
 
-      const ax = (target[ix] * expansion - pos[ix]) * 0.01;
-      const ay = (target[iy] * expansion - pos[iy]) * 0.01;
-      const az = (target[iz] * expansion - pos[iz]) * 0.01;
+      const spring = template === 'AADIL' ? 0.15 : 0.01;
+      const ax = (target[ix] * expansion - pos[ix]) * spring;
+      const ay = (target[iy] * expansion - pos[iy]) * spring;
+      const az = (target[iz] * expansion - pos[iz]) * spring;
 
       let attrX = 0, attrY = 0;
       if (attractionStrength > 0) {
@@ -535,12 +597,13 @@ class ParticleEngine {
       vel[iy] += ay + attrY + windY + ny;
       vel[iz] += az + windZ + nz;
       
-      vel[ix] *= 0.94; vel[iy] *= 0.94; vel[iz] *= 0.94;
+      const damping = template === 'AADIL' ? 0.8 : 0.94;
+      vel[ix] *= damping; vel[iy] *= damping; vel[iz] *= damping;
       pos[ix] += vel[ix]; pos[iy] += vel[iy]; pos[iz] += vel[iz];
     }
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.life.needsUpdate = true;
-    this.points.rotation.y += 0.001;
+    this.points.rotation.y += template === 'AADIL' ? 0 : 0.001; 
     this.composer.render();
   }
 }
@@ -570,7 +633,6 @@ async function setupApp() {
   const structGrid = document.getElementById('structure-grid')!;
   const textureGrid = document.getElementById('texture-grid')!;
 
-  // Initialize Structure Buttons
   ALL_TEMPLATES.forEach(temp => {
       const btn = document.createElement('button');
       btn.className = 'grid-btn struct-btn';
@@ -579,7 +641,6 @@ async function setupApp() {
       structGrid.appendChild(btn);
   });
 
-  // Initialize Texture Buttons
   const updateTextureButtons = () => {
     textureGrid.innerHTML = '';
     activePalettes.forEach((pal, idx) => {
@@ -698,9 +759,6 @@ async function setupApp() {
         const palmSize = Math.sqrt(Math.pow(wrist.x - indexTip.x, 2));
         if (palmSize > 0.3) engine.setTemplate('HEART');
         else if (dist < 0.05) engine.setTemplate('SATURN');
-        else {
-           // We don't force morph here to let buttons work, but maybe handle wave
-        }
         engine.updatePhysics(expansion, attractX, attractY, true);
       }
 
