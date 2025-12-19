@@ -39,7 +39,7 @@ class Noise3D {
 }
 
 // --- Constants & Types ---
-const PARTICLE_COUNT = 20000;
+const MAX_PARTICLE_COUNT = 20000;
 const STORAGE_KEY = 'aether_vision_config';
 const CUSTOM_PALETTES_KEY = 'aether_custom_palettes';
 
@@ -75,6 +75,8 @@ interface ParticleState {
   baseParticleSize: number;
   lifespanSpeed: number;
   bloomIntensity: number;
+  worldOffset: THREE.Vector3;
+  particleCount: number;
 }
 
 // --- Audio Engine ---
@@ -168,6 +170,7 @@ class ParticleEngine {
   geometry: THREE.BufferGeometry;
   audio: AetherAudio;
   noiseField: Noise3D;
+  trackingGlow: THREE.Sprite;
   
   positions: Float32Array;
   targetPositions: Float32Array;
@@ -185,12 +188,13 @@ class ParticleEngine {
     paletteIndex: 0,
     nextPaletteIndex: 0,
     paletteTransition: 1.0,
-    baseParticleSize: 0.08,
+    baseParticleSize: 0.06, 
     lifespanSpeed: 1.0,
-    bloomIntensity: 1.5
+    bloomIntensity: 1.5,
+    worldOffset: new THREE.Vector3(0, 0, 0),
+    particleCount: MAX_PARTICLE_COUNT
   };
 
-  // Pre-sampled text coordinates for "Aadil"
   textCoords: {x: number, y: number}[] = [];
 
   constructor(audio: AetherAudio) {
@@ -219,15 +223,41 @@ class ParticleEngine {
     );
     this.composer.addPass(this.bloomPass);
 
-    this.positions = new Float32Array(PARTICLE_COUNT * 3);
-    this.targetPositions = new Float32Array(PARTICLE_COUNT * 3);
-    this.velocities = new Float32Array(PARTICLE_COUNT * 3);
-    this.colors = new Float32Array(PARTICLE_COUNT * 3);
-    this.sizes = new Float32Array(PARTICLE_COUNT);
-    this.lifespanValues = new Float32Array(PARTICLE_COUNT);
-    this.decayRates = new Float32Array(PARTICLE_COUNT);
+    // Initialise Tracking Glow Sprite
+    const glowCanvas = document.createElement('canvas');
+    glowCanvas.width = 64;
+    glowCanvas.height = 64;
+    const glowCtx = glowCanvas.getContext('2d')!;
+    const gradient = glowCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)');
+    gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    glowCtx.fillStyle = gradient;
+    glowCtx.fillRect(0, 0, 64, 64);
+    
+    const glowTexture = new THREE.CanvasTexture(glowCanvas);
+    const glowMaterial = new THREE.SpriteMaterial({ 
+      map: glowTexture, 
+      color: 0xffffff, 
+      transparent: true, 
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      visible: false
+    });
+    this.trackingGlow = new THREE.Sprite(glowMaterial);
+    this.trackingGlow.scale.set(8, 8, 1);
+    this.scene.add(this.trackingGlow);
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    this.positions = new Float32Array(MAX_PARTICLE_COUNT * 3);
+    this.targetPositions = new Float32Array(MAX_PARTICLE_COUNT * 3);
+    this.velocities = new Float32Array(MAX_PARTICLE_COUNT * 3);
+    this.colors = new Float32Array(MAX_PARTICLE_COUNT * 3);
+    this.sizes = new Float32Array(MAX_PARTICLE_COUNT);
+    this.lifespanValues = new Float32Array(MAX_PARTICLE_COUNT);
+    this.decayRates = new Float32Array(MAX_PARTICLE_COUNT);
+
+    for (let i = 0; i < MAX_PARTICLE_COUNT; i++) {
         this.sizes[i] = this.state.baseParticleSize * (0.8 + Math.random() * 0.4);
         this.lifespanValues[i] = Math.random();
         const individualLifespan = 0.5 + Math.random() * 1.5;
@@ -275,7 +305,6 @@ class ParticleEngine {
     this.scene.add(this.points);
     this.camera.position.z = 40;
 
-    // Prepare text sampling for "Aadil"
     this.prepareTextSampling("Aadil");
 
     this.setTemplate('SPHERE');
@@ -296,13 +325,11 @@ class ParticleEngine {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // Adjusted sampling canvas size for better mobile proportions
-    canvas.width = 800;
-    canvas.height = 400;
+    canvas.width = 600;
+    canvas.height = 300;
     
     ctx.fillStyle = 'white';
-    // Using a font size that leaves room for the display edges
-    ctx.font = 'bold 200px "Inter", "Arial", sans-serif';
+    ctx.font = 'bold 160px "Inter", "Arial", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, canvas.width / 2, canvas.height / 2);
@@ -316,11 +343,9 @@ class ParticleEngine {
       for (let x = 0; x < canvas.width; x += step) {
         const index = (y * canvas.width + x) * 4;
         if (pixels[index] > 128) {
-          // Scaling down the normalization factor from 0.12 to 0.05 
-          // to make the structure "normal" size for mobile displays
           this.textCoords.push({
-            x: (x - canvas.width / 2) * 0.055, 
-            y: (canvas.height / 2 - y) * 0.055
+            x: (x - canvas.width / 2) * 0.05, 
+            y: (canvas.height / 2 - y) * 0.05
           });
         }
       }
@@ -361,10 +386,15 @@ class ParticleEngine {
   setParticleSize(baseSize: number) {
     this.state.baseParticleSize = baseSize;
     const sizeAttr = this.geometry.attributes.size.array as Float32Array;
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    for (let i = 0; i < MAX_PARTICLE_COUNT; i++) {
         sizeAttr[i] = baseSize * (0.8 + Math.random() * 0.4);
     }
     this.geometry.attributes.size.needsUpdate = true;
+  }
+
+  setParticleCount(count: number) {
+    this.state.particleCount = count;
+    this.geometry.setDrawRange(0, count);
   }
 
   setBloomIntensity(intensity: number) {
@@ -381,9 +411,9 @@ class ParticleEngine {
     this.state.template = type;
     this.audio.playMorph();
 
-    const tempPositions = new Float32Array(PARTICLE_COUNT * 3);
+    const tempPositions = new Float32Array(MAX_PARTICLE_COUNT * 3);
     
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    for (let i = 0; i < MAX_PARTICLE_COUNT; i++) {
       const idx = i * 3;
       let x = 0, y = 0, z = 0;
 
@@ -391,47 +421,43 @@ class ParticleEngine {
         case 'AADIL': {
           if (this.textCoords.length > 0) {
             const coord = this.textCoords[i % this.textCoords.length];
-            x = coord.x;
-            y = coord.y;
-            z = (Math.random() - 0.5) * 2; // Reduced 3D depth for a cleaner mobile look
-          } else {
-            const t = Math.random();
-            const theta = Math.random() * Math.PI * 2;
-            const xPos = (t - 0.5) * 30;
-            const yWave = Math.sin(t * Math.PI * 4) * 3;
-            const radius = 1 + Math.random() * 2;
-            x = xPos; y = yWave + Math.cos(theta) * radius; z = Math.sin(theta) * radius;
+            x = coord.x; y = coord.y;
+            z = (Math.random() - 0.5) * 1.5; 
           }
           break;
         }
         case 'HEART': {
           const t = Math.random() * Math.PI * 2;
           const u = (Math.random() - 0.5) * 2.0;
+          // Refined heart curve for smoother appearance and pronounced cleft
           const h_x = 16 * Math.pow(Math.sin(t), 3);
-          const h_y = 15 * Math.cos(t) - 8 * Math.cos(2 * t) - 2.5 * Math.cos(3 * t) - Math.cos(4 * t);
-          const volume = Math.pow(Math.cos(u * Math.PI * 0.5), 0.5); 
-          x = h_x * volume; y = h_y * volume; z = u * 12 * volume; 
-          x *= 0.85; y *= 0.85; y += 3.0;
+          const h_y = 14 * Math.cos(t) - 6 * Math.cos(2 * t) - 3 * Math.cos(3 * t) - Math.cos(4 * t);
+          // Volume calculation for 3D depth
+          const volume = Math.pow(Math.cos(u * Math.PI * 0.5), 0.6); 
+          // Center the heart and scale for visibility
+          x = h_x * volume * 0.65; 
+          y = h_y * volume * 0.65 + 4.0; 
+          z = u * 8 * volume; 
           break;
         }
         case 'FLOWER': {
           const f_angle = Math.random() * Math.PI * 2;
           const k = 6; 
-          const r = 18 * Math.cos(k * f_angle);
-          x = r * Math.cos(f_angle); y = r * Math.sin(f_angle); z = (Math.random() - 0.5) * 6;
+          const r = 10 * Math.cos(k * f_angle);
+          x = r * Math.cos(f_angle); y = r * Math.sin(f_angle); z = (Math.random() - 0.5) * 4;
           break;
         }
         case 'SATURN': {
-          if (i < PARTICLE_COUNT * 0.4) {
-            const s_radius = 8 * Math.pow(Math.random(), 0.5);
+          if (i < MAX_PARTICLE_COUNT * 0.4) {
+            const s_radius = 5 * Math.pow(Math.random(), 0.5);
             const su = Math.random() * Math.PI * 2;
             const sv = Math.acos(2 * Math.random() - 1);
             x = s_radius * Math.sin(sv) * Math.cos(su); y = s_radius * Math.sin(sv) * Math.sin(su); z = s_radius * Math.cos(sv);
           } else {
-            const inner = 12; const outer = 22;
+            const inner = 8; const outer = 14;
             const radius = inner + Math.random() * (outer - inner);
             const theta = Math.random() * Math.PI * 2;
-            x = radius * Math.cos(theta); z = radius * Math.sin(theta); y = (Math.random() - 0.5) * 0.8;
+            x = radius * Math.cos(theta); z = radius * Math.sin(theta); y = (Math.random() - 0.5) * 0.6;
             const tempY = y * Math.cos(0.5) - z * Math.sin(0.5);
             const tempZ = y * Math.sin(0.5) + z * Math.cos(0.5);
             y = tempY; z = tempZ;
@@ -439,7 +465,7 @@ class ParticleEngine {
           break;
         }
         case 'FIREWORKS': {
-          const fireRadius = 10 + Math.random() * 25;
+          const fireRadius = 6 + Math.random() * 15;
           const fTheta = Math.random() * Math.PI * 2;
           const fPhi = Math.acos(2 * Math.random() - 1);
           x = fireRadius * Math.sin(fPhi) * Math.cos(fTheta); y = fireRadius * Math.sin(fPhi) * Math.sin(fTheta); z = fireRadius * Math.cos(fPhi);
@@ -447,23 +473,23 @@ class ParticleEngine {
         }
         case 'GALAXY': {
           const arm = i % 2 === 0 ? 0 : Math.PI;
-          const r_gal = Math.random() * 25;
-          const theta_gal = r_gal * 0.4 + arm + (Math.random() - 0.5) * 0.8;
-          x = r_gal * Math.cos(theta_gal); y = r_gal * Math.sin(theta_gal); z = (Math.random() - 0.5) * (15 / (r_gal + 1));
+          const r_gal = Math.random() * 15;
+          const theta_gal = r_gal * 0.5 + arm + (Math.random() - 0.5) * 0.8;
+          x = r_gal * Math.cos(theta_gal); y = r_gal * Math.sin(theta_gal); z = (Math.random() - 0.5) * (10 / (r_gal + 1));
           break;
         }
         case 'NEBULA': {
           const u_neb = Math.random() * Math.PI * 2;
           const v_neb = Math.random() * Math.PI - Math.PI/2;
-          const r_neb = 18 * (Math.random() + 0.1);
-          const pinch = 0.15 + Math.pow(Math.abs(Math.sin(v_neb)), 2);
+          const r_neb = 12 * (Math.random() + 0.1);
+          const pinch = 0.2 + Math.pow(Math.abs(Math.sin(v_neb)), 2);
           x = r_neb * pinch * Math.cos(v_neb) * Math.cos(u_neb); y = r_neb * pinch * Math.sin(v_neb); z = r_neb * pinch * Math.cos(v_neb) * Math.sin(u_neb);
           break;
         }
         default: { // SPHERE
           const s_su = Math.random() * Math.PI * 2;
           const s_sv = Math.acos(2 * Math.random() - 1);
-          const sradius = 15;
+          const sradius = 10;
           x = sradius * Math.sin(s_sv) * Math.cos(s_su); y = sradius * Math.sin(s_sv) * Math.sin(s_su); z = sradius * Math.cos(s_sv);
         }
       }
@@ -496,7 +522,8 @@ class ParticleEngine {
       paletteIndex: this.state.paletteIndex,
       particleSize: this.state.baseParticleSize,
       lifespanSpeed: this.state.lifespanSpeed,
-      bloomIntensity: this.state.bloomIntensity
+      bloomIntensity: this.state.bloomIntensity,
+      particleCount: this.state.particleCount
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
     return config;
@@ -526,6 +553,11 @@ class ParticleEngine {
           const slider = document.getElementById('bloom-slider') as HTMLInputElement;
           if (slider) slider.value = config.bloomIntensity.toString();
       }
+      if (config.particleCount !== undefined) {
+          this.setParticleCount(config.particleCount);
+          const slider = document.getElementById('density-slider') as HTMLInputElement;
+          if (slider) slider.value = config.particleCount.toString();
+      }
       this.updateThemeLabel();
       return config;
     } catch (e) {
@@ -539,7 +571,7 @@ class ParticleEngine {
     const target = this.targetPositions;
     const vel = this.velocities;
     const lifeAttr = this.geometry.attributes.life.array as Float32Array;
-    const { expansion, attractionPoint, attractionStrength, paletteIndex, nextPaletteIndex, paletteTransition, lifespanSpeed, template } = this.state;
+    const { expansion, attractionPoint, attractionStrength, paletteIndex, nextPaletteIndex, paletteTransition, lifespanSpeed, template, particleCount } = this.state;
     const time = performance.now() * 0.001;
 
     if (this.state.paletteTransition < 1.0) {
@@ -554,10 +586,22 @@ class ParticleEngine {
     const lerpFactor = Math.min(Math.max((expansion - 0.8) / 1.5, 0), 1);
     const lerpedColor = baseA.clone().lerp(baseB, lerpFactor);
     const colorAttr = this.geometry.attributes.color.array as Float32Array;
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    for (let i = 0; i < particleCount; i++) {
         colorAttr[i*3] = lerpedColor.r; colorAttr[i*3+1] = lerpedColor.g; colorAttr[i*3+2] = lerpedColor.b;
     }
     this.geometry.attributes.color.needsUpdate = true;
+
+    // Update Tracking Glow
+    if (attractionStrength > 0) {
+      this.trackingGlow.visible = true;
+      this.trackingGlow.position.set(attractionPoint.x, attractionPoint.y, 0);
+      this.trackingGlow.material.color.copy(lerpedColor);
+      const pulse = 0.85 + Math.sin(time * 8) * 0.15;
+      this.trackingGlow.scale.set(10 * pulse, 10 * pulse, 1);
+      this.trackingGlow.material.opacity = (0.2 + Math.sin(time * 8) * 0.1) * (attractionStrength / 0.08);
+    } else {
+      this.trackingGlow.visible = false;
+    }
 
     const windX = Math.sin(time * 0.4) * 0.015;
     const windY = Math.cos(time * 0.2) * 0.01;
@@ -566,19 +610,21 @@ class ParticleEngine {
     const noiseScale = 0.05;
     const noiseAmp = 0.015;
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
+    for (let i = 0; i < particleCount; i++) {
       const ix = i * 3; const iy = i * 3 + 1; const iz = i * 3 + 2;
       
       lifeAttr[i] -= this.decayRates[i] * lifespanSpeed;
       if (lifeAttr[i] <= 0) {
           lifeAttr[i] = 1.0;
-          pos[ix] = target[ix] * expansion + (Math.random() - 0.5) * (template === 'AADIL' ? 0.2 : 5);
-          pos[iy] = target[iy] * expansion + (Math.random() - 0.5) * (template === 'AADIL' ? 0.2 : 5);
-          pos[iz] = target[iz] * expansion + (Math.random() - 0.5) * (template === 'AADIL' ? 0.2 : 5);
+          const isSpecial = template === 'AADIL';
+          pos[ix] = target[ix] * expansion + (Math.random() - 0.5) * (isSpecial ? 0.08 : 3);
+          pos[iy] = target[iy] * expansion + (Math.random() - 0.5) * (isSpecial ? 0.08 : 3);
+          pos[iz] = target[iz] * expansion + (Math.random() - 0.5) * (isSpecial ? 0.08 : 3);
           vel[ix] = 0; vel[iy] = 0; vel[iz] = 0;
       }
 
-      const spring = template === 'AADIL' ? 0.15 : 0.01;
+      const isSpecial = template === 'AADIL';
+      const spring = isSpecial ? 0.24 : 0.01; 
       const ax = (target[ix] * expansion - pos[ix]) * spring;
       const ay = (target[iy] * expansion - pos[iy]) * spring;
       const az = (target[iz] * expansion - pos[iz]) * spring;
@@ -597,13 +643,14 @@ class ParticleEngine {
       vel[iy] += ay + attrY + windY + ny;
       vel[iz] += az + windZ + nz;
       
-      const damping = template === 'AADIL' ? 0.8 : 0.94;
+      const damping = isSpecial ? 0.70 : 0.94;
       vel[ix] *= damping; vel[iy] *= damping; vel[iz] *= damping;
       pos[ix] += vel[ix]; pos[iy] += vel[iy]; pos[iz] += vel[iz];
     }
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.life.needsUpdate = true;
-    this.points.rotation.y += template === 'AADIL' ? 0 : 0.001; 
+    const shouldRotate = template !== 'AADIL';
+    this.points.rotation.y += shouldRotate ? 0.001 : 0; 
     this.composer.render();
   }
 }
@@ -627,9 +674,10 @@ async function setupApp() {
   const hexAInput = document.getElementById('hex-a') as HTMLInputElement;
   const hexBInput = document.getElementById('hex-b') as HTMLInputElement;
   const sizeSlider = document.getElementById('size-slider') as HTMLInputElement;
+  const densitySlider = document.getElementById('density-slider') as HTMLInputElement;
   const lifespanSlider = document.getElementById('lifespan-slider') as HTMLInputElement;
   const bloomSlider = document.getElementById('bloom-slider') as HTMLInputElement;
-  
+
   const structGrid = document.getElementById('structure-grid')!;
   const textureGrid = document.getElementById('texture-grid')!;
 
@@ -671,6 +719,11 @@ async function setupApp() {
   sizeSlider.oninput = (e) => {
     const val = parseFloat((e.target as HTMLInputElement).value);
     engine.setParticleSize(val);
+  };
+
+  densitySlider.oninput = (e) => {
+    const val = parseInt((e.target as HTMLInputElement).value);
+    engine.setParticleCount(val);
   };
 
   lifespanSlider.oninput = (e) => {
@@ -746,8 +799,9 @@ async function setupApp() {
       const indexTip = primaryHand[8];
       const thumbTip = primaryHand[4];
       const wrist = primaryHand[0];
-      const attractX = (1 - indexTip.x * 2) * 40;
-      const attractY = (1 - indexTip.y * 2) * 30;
+      
+      const attractX = (indexTip.x - 0.5) * 80; 
+      const attractY = (0.5 - indexTip.y) * 60;
       const dist = Math.sqrt(Math.pow(indexTip.x - thumbTip.x, 2) + Math.pow(indexTip.y - thumbTip.y, 2));
       const expansion = 0.5 + dist * 5.0;
 
